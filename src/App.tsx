@@ -1,7 +1,8 @@
-import React, { useEffect, useRef, useState } from 'react';
-import Webcam from 'react-webcam';
-import * as faceapi from 'face-api.js';
-import { Camera, Plus, Scan } from 'lucide-react';
+import React, { useEffect, useRef, useState, useMemo, useCallback } from "react";
+import Webcam from "react-webcam";
+import * as faceapi from "face-api.js";
+import { Camera, Plus, Scan, Video, X } from "lucide-react";
+import toast, { Toaster } from "react-hot-toast";
 
 interface FacePerson {
   name: string;
@@ -13,219 +14,204 @@ interface VideoDevice {
   label: string;
 }
 
+const MODELS_URL = "https://justadudewhohacks.github.io/face-api.js/models";
+
 function App() {
   const [isModelLoaded, setIsModelLoaded] = useState(false);
   const [faces, setFaces] = useState<FacePerson[]>([]);
-  const [currentName, setCurrentName] = useState('');
+  const [currentName, setCurrentName] = useState("");
   const [isDetecting, setIsDetecting] = useState(false);
-  const [message, setMessage] = useState('');
+  const [message, setMessage] = useState("");
   const [devices, setDevices] = useState<VideoDevice[]>([]);
-  const [currentDevice, setCurrentDevice] = useState<string>('');
+  const [currentDevice, setCurrentDevice] = useState("");
   const [isWebcamReady, setIsWebcamReady] = useState(false);
   const webcamRef = useRef<Webcam>(null);
+  const detectionInterval = useRef<NodeJS.Timeout>();
 
-  // for loading face api model
+  // Memoized labeled descriptors for better performance
+  const labeledDescriptors = useMemo(
+    () =>
+      faces.map(
+        (face) =>
+          new faceapi.LabeledFaceDescriptors(face.name, [face.descriptor])
+      ),
+    [faces]
+  );
+
+  // Load face detection models
   useEffect(() => {
     const loadModels = async () => {
       try {
-        const MODEL_URL = 'https://justadudewhohacks.github.io/face-api.js/models';
         await Promise.all([
-          faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL),
-          faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL),
-          faceapi.nets.ssdMobilenetv1.loadFromUri(MODEL_URL),
+          faceapi.nets.faceRecognitionNet.loadFromUri(MODELS_URL),
+          faceapi.nets.faceLandmark68Net.loadFromUri(MODELS_URL),
+          faceapi.nets.ssdMobilenetv1.loadFromUri(MODELS_URL),
         ]);
         setIsModelLoaded(true);
       } catch (error) {
-        console.error('Error loading models:', error);
-        setMessage('Error loading face detection models. Please refresh the page.');
+        setMessage("Error loading face detection models");
+        console.error("Model loading error:", error);
       }
     };
     loadModels();
   }, []);
 
-
-// for getting  camera access
+  // Get video devices
   useEffect(() => {
     const getVideoDevices = async () => {
       try {
-        const devices = await navigator.mediaDevices.enumerateDevices();
-        const videoDevices = devices
-          .filter(device => device.kind === 'videoinput')
-          .map(device => ({
-            deviceId: device.deviceId,
-            label: device.label || `Camera ${devices.indexOf(device) + 1}`
-          }));
+        const mediaDevices = await navigator.mediaDevices.enumerateDevices();
+        const videoDevices = mediaDevices
+          .filter((d) => d.kind === "videoinput")
+          .map((d) => ({ deviceId: d.deviceId, label: d.label || "Camera" }));
         setDevices(videoDevices);
-        if (videoDevices.length > 0) {
-          setCurrentDevice(videoDevices[0].deviceId);
-        }
+        setCurrentDevice(videoDevices[0]?.deviceId || "");
       } catch (error) {
-        console.error('Error accessing cameras:', error);
-        setMessage('Error accessing cameras. Please check camera permissions.');
+        setMessage("Camera access denied");
+        console.error("Camera error:", error);
       }
     };
     getVideoDevices();
   }, []);
 
-  // Reset webcam ready state when device changes
+  // Cleanup detection interval
   useEffect(() => {
-    setIsWebcamReady(false);
-  }, [currentDevice]);
+    return () => {
+      if (detectionInterval.current) clearInterval(detectionInterval.current);
+    };
+  }, []);
 
-  const captureAndAddFace = async () => {
-    if (!webcamRef.current || !currentName.trim() || !isWebcamReady) return;
+  const captureAndAddFace = useCallback(async () => {
+    if (!webcamRef.current?.video || !currentName.trim()) return;
 
     try {
       const video = webcamRef.current.video;
-      if (!video) return;
-
-      // Ensure video is playing and has dimensions
-      if (video.readyState !== 4 || video.videoWidth === 0 || video.videoHeight === 0) {
-        setMessage('Please wait for the camera to initialize fully');
+      if (video.readyState !== 4) {
+        setMessage("Camera not ready");
         return;
       }
 
-      // Use video element directly instead of screenshot
-      const detection = await faceapi.detectSingleFace(video)
+      const detection = await faceapi
+        .detectSingleFace(video)
         .withFaceLandmarks()
         .withFaceDescriptor();
 
       if (detection) {
-        setFaces(prev => [...prev, {
-          name: currentName,
-          descriptor: detection.descriptor
-        }]);
-        setCurrentName('');
-        setMessage(`${currentName} added successfully!`);
-        setTimeout(() => setMessage(''), 3000);
+        setFaces((prev) => [...prev, { name: currentName, descriptor: detection.descriptor }]);
+        setCurrentName("");
+        toast.success(`${currentName} added successfully!`);
       } else {
-        setMessage('No face detected. Please try again.');
-        setTimeout(() => setMessage(''), 3000);
+        toast.error("No face detected");
       }
     } catch (error) {
-      console.error('Error capturing face:', error);
-      setMessage('Error capturing face. Please try again.');
-      setTimeout(() => setMessage(''), 3000);
+      toast.error("Error capturing face");
+      console.error("Capture error:", error);
     }
-  };
+  }, [currentName]);
 
-  const startDetecting = async () => {
-    if (!webcamRef.current || faces.length === 0 || !isWebcamReady) return;
+  const startDetection = useCallback(async () => {
+    if (!webcamRef.current?.video || faces.length === 0) return;
+
     setIsDetecting(true);
+    const faceMatcher = new faceapi.FaceMatcher(labeledDescriptors);
 
-    const detectFaces = async () => {
-      if (!webcamRef.current?.video) return;
-      
-      const video = webcamRef.current.video;
-      if (video.readyState !== 4) return;
-
+    const detectFrame = async () => {
       try {
-        const detections = await faceapi.detectAllFaces(video)
+        const detections = await faceapi
+          .detectAllFaces(webcamRef.current!.video!)
           .withFaceLandmarks()
           .withFaceDescriptors();
 
-        if (detections.length > 0) {
-          const labeledDescriptors = faces.map(
-            face => new faceapi.LabeledFaceDescriptors(face.name, [face.descriptor])
-          );
-          const faceMatcher = new faceapi.FaceMatcher(labeledDescriptors);
+        const results = detections.map((d) => faceMatcher.findBestMatch(d.descriptor));
+        const matchedNames = results.filter(r => r.label !== "unknown").map(r => r.label);
 
-          const results = detections.map(detection => 
-            faceMatcher.findBestMatch(detection.descriptor)
-          );
-
-          const detectedNames = results
-            .filter(result => result.label !== 'unknown')
-            .map(result => result.label);
-
-          if (detectedNames.length > 0) {
-            setMessage(`Detected: ${detectedNames.join(', ')}`);
-          } else {
-            setMessage('No registered faces detected');
-          }
-        } else {
-          setMessage('No faces detected');
+        if (matchedNames.length > 0) {
+          setMessage(`Recognized: ${matchedNames.join(", ")}`);
+        } else if (detections.length > 0) {
+          setMessage("Unknown person detected");
+          toast.error("Suspicious activity detected!");
         }
       } catch (error) {
-        console.error('Error during face detection:', error);
-        setMessage('Error during face detection');
+        console.error("Detection error:", error);
       }
     };
 
-    const interval = setInterval(detectFaces, 1000);
-    return () => clearInterval(interval);
-  };
+    detectionInterval.current = setInterval(detectFrame, 1500);
+  }, [labeledDescriptors, faces.length]);
+
+  const stopDetection = useCallback(() => {
+    setIsDetecting(false);
+    setMessage("");
+    if (detectionInterval.current) clearInterval(detectionInterval.current);
+  }, []);
 
   if (!isModelLoaded) {
     return (
-      <div className="min-h-screen bg-gray-100 flex items-center justify-center">
-        <div className="text-xl font-semibold">Loading face detection models...</div>
+      <div className="min-h-screen bg-gradient-to-br from-blue-50 to-purple-50 flex items-center justify-center">
+        <div className="animate-pulse text-xl font-semibold text-blue-600">
+          Loading AI models...
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gray-100 p-8">
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-purple-50 p-4">
+      <Toaster position="top-right" />
       <div className="max-w-4xl mx-auto">
-        <div className="bg-white rounded-lg shadow-lg p-6 mb-6">
-          <h1 className="text-3xl font-bold mb-6 flex items-center gap-2">
-            <Camera className="w-8 h-8" />
-            Face Detection App
-          </h1>
+        <div className="bg-white rounded-2xl shadow-xl p-6 mb-6 transition-all duration-300 hover:shadow-2xl">
+          <header className="flex items-center gap-3 mb-8">
+            <Camera className="w-8 h-8 text-blue-600" />
+            <h1 className="text-3xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
+              FaceGuard AI
+            </h1>
+          </header>
 
-          {devices.length > 0 && (
-            <div className="mb-4">
-              <label htmlFor="camera-select" className="block text-sm font-medium text-gray-700 mb-2">
-                Select Camera
-              </label>
-              <select
-                id="camera-select"
-                value={currentDevice}
-                onChange={(e) => setCurrentDevice(e.target.value)}
-                className="w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-              >
-                {devices.map((device) => (
-                  <option key={device.deviceId} value={device.deviceId}>
-                    {device.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-          )}
+          <div className="mb-6 space-y-4">
+            <label className="block text-sm font-medium text-gray-600">Camera Selection</label>
+            <select
+              value={currentDevice}
+              onChange={(e) => setCurrentDevice(e.target.value)}
+              className="w-full px-4 py-2.5 rounded-xl border border-gray-200 focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
+            >
+              {devices.map((device) => (
+                <option key={device.deviceId} value={device.deviceId}>
+                  {device.label}
+                </option>
+              ))}
+            </select>
+          </div>
 
-          <div className="mb-6">
+          <div className="relative mb-8 rounded-xl overflow-hidden border-4 border-gray-100">
             <Webcam
               ref={webcamRef}
-              className="w-full rounded-lg"
-              screenshotFormat="image/jpeg"
-              videoConstraints={{
-                deviceId: currentDevice,
-                width: 640,
-                height: 480
-              }}
+              audio={false}
+              videoConstraints={{ deviceId: currentDevice }}
+              className="w-full aspect-video"
               onUserMedia={() => setIsWebcamReady(true)}
-              onUserMediaError={(error) => {
-                console.error('Webcam error:', error);
-                setMessage('Error accessing camera. Please check permissions and try again.');
-                setIsWebcamReady(false);
-              }}
+              onUserMediaError={() => toast.error("Camera access denied")}
             />
+            {!isWebcamReady && (
+              <div className="absolute inset-0 bg-gray-100 flex items-center justify-center">
+                <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-600"></div>
+              </div>
+            )}
           </div>
 
           {!isDetecting ? (
-            <div className="space-y-4">
-              <div className="flex gap-2">
+            <div className="space-y-6">
+              <div className="flex gap-3">
                 <input
                   type="text"
                   value={currentName}
                   onChange={(e) => setCurrentName(e.target.value)}
                   placeholder="Enter person's name"
-                  className="flex-1 px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="flex-1 px-4 py-2.5 rounded-xl border border-gray-200 focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
                 />
                 <button
                   onClick={captureAndAddFace}
-                  className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 flex items-center gap-2"
-                  disabled={!currentName.trim() || !isWebcamReady}
+                  disabled={!currentName || !isWebcamReady}
+                  className="px-6 py-2.5 bg-blue-600 text-white rounded-xl hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center gap-2"
                 >
                   <Plus className="w-5 h-5" />
                   Add Face
@@ -233,13 +219,13 @@ function App() {
               </div>
 
               <div className="flex justify-between items-center">
-                <div className="text-sm text-gray-600">
-                  {faces.length} faces registered
+                <div className="text-sm text-gray-500">
+                  {faces.length} registered faces
                 </div>
                 <button
-                  onClick={startDetecting}
-                  className="px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 flex items-center gap-2"
-                  disabled={faces.length === 0 || !isWebcamReady}
+                  onClick={startDetection}
+                  disabled={faces.length === 0}
+                  className="px-6 py-2.5 bg-green-600 text-white rounded-xl hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center gap-2"
                 >
                   <Scan className="w-5 h-5" />
                   Start Detection
@@ -247,27 +233,33 @@ function App() {
               </div>
             </div>
           ) : (
-            <button
-              onClick={() => setIsDetecting(false)}
-              className="px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600"
-            >
-              Stop Detection
-            </button>
-          )}
-
-          {message && (
-            <div className="mt-4 p-4 bg-blue-100 text-blue-800 rounded-lg">
-              {message}
+            <div className="space-y-4">
+              <div className="flex justify-between items-center">
+                <div className="font-medium text-blue-600">{message}</div>
+                <button
+                  onClick={stopDetection}
+                  className="px-6 py-2.5 bg-red-600 text-white rounded-xl hover:bg-red-700 transition-all flex items-center gap-2"
+                >
+                  <X className="w-5 h-5" />
+                  Stop Detection
+                </button>
+              </div>
             </div>
           )}
 
           {faces.length > 0 && (
-            <div className="mt-6">
-              <h2 className="text-xl font-semibold mb-3">Registered Faces:</h2>
-              <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+            <div className="mt-8">
+              <h3 className="text-lg font-semibold mb-4 text-gray-700">Registered Persons</h3>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                 {faces.map((face, index) => (
-                  <div key={index} className="p-3 bg-gray-100 rounded-lg">
-                    {face.name}
+                  <div
+                    key={index}
+                    className="p-3 bg-blue-50 rounded-lg border border-blue-100 animate-fade-in"
+                  >
+                    <div className="flex items-center gap-2">
+                      <Video className="w-4 h-4 text-blue-600" />
+                      <span className="text-sm font-medium text-blue-800">{face.name}</span>
+                    </div>
                   </div>
                 ))}
               </div>
