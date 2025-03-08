@@ -1,8 +1,17 @@
-import React, { useEffect, useRef, useState, useCallback, useMemo } from "react";
+import React, {
+  useEffect,
+  useRef,
+  useState,
+  useCallback,
+  useMemo,
+} from "react";
 import Webcam from "react-webcam";
 import * as faceapi from "face-api.js";
-import { Camera, Plus, Scan, Video, X } from "lucide-react";
+import { Plus, Scan, Video, X } from "lucide-react";
 import toast, { Toaster } from "react-hot-toast";
+import ModelsLoading from "./components/ModelsLoading";
+import Header from "./components/Header";
+import CameraSelector from "./components/CameraSelector";
 
 interface FacePerson {
   name: string;
@@ -30,9 +39,11 @@ function App() {
 
   // Memoized face descriptors for better performance
   const labeledDescriptors = useMemo(
-    () => faces.map(face => 
-      new faceapi.LabeledFaceDescriptors(face.name, [face.descriptor])
-    ),
+    () =>
+      faces.map(
+        (face) =>
+          new faceapi.LabeledFaceDescriptors(face.name, [face.descriptor])
+      ),
     [faces]
   );
 
@@ -60,8 +71,8 @@ function App() {
       try {
         const mediaDevices = await navigator.mediaDevices.enumerateDevices();
         const videoDevices = mediaDevices
-          .filter(d => d.kind === "videoinput")
-          .map(d => ({ deviceId: d.deviceId, label: d.label || "Camera" }));
+          .filter((d) => d.kind === "videoinput")
+          .map((d) => ({ deviceId: d.deviceId, label: d.label || "Camera" }));
         setDevices(videoDevices);
         setCurrentDevice(videoDevices[0]?.deviceId || "");
       } catch (error) {
@@ -73,9 +84,12 @@ function App() {
   }, []);
 
   // Cleanup on unmount
-  useEffect(() => () => {
-    if (detectionInterval.current) clearInterval(detectionInterval.current);
-  }, []);
+  useEffect(
+    () => () => {
+      if (detectionInterval.current) clearInterval(detectionInterval.current);
+    },
+    []
+  );
 
   const captureAndAddFace = useCallback(async () => {
     if (!webcamRef.current?.video || !currentName.trim()) return;
@@ -93,10 +107,13 @@ function App() {
         .withFaceDescriptor();
 
       if (detection) {
-        setFaces(prev => [...prev, { 
-          name: currentName, 
-          descriptor: detection.descriptor 
-        }]);
+        setFaces((prev) => [
+          ...prev,
+          {
+            name: currentName,
+            descriptor: detection.descriptor,
+          },
+        ]);
         setCurrentName("");
         toast.success(`${currentName} added successfully!`);
       } else {
@@ -121,13 +138,13 @@ function App() {
           .withFaceLandmarks()
           .withFaceDescriptors();
 
-        const results = detections.map(d => 
+        const results = detections.map((d) =>
           faceMatcher.findBestMatch(d.descriptor)
         );
 
         const matchedNames = results
-          .filter(r => r.label !== "unknown")
-          .map(r => r.label);
+          .filter((r) => r.label !== "unknown")
+          .map((r) => r.label);
 
         if (matchedNames.length > 0) {
           toast.success(`Recognized: ${matchedNames.join(", ")}`);
@@ -139,7 +156,10 @@ function App() {
       }
     };
 
-    detectionInterval.current = window.setInterval(detectFrame, DETECTION_INTERVAL);
+    detectionInterval.current = window.setInterval(
+      detectFrame,
+      DETECTION_INTERVAL
+    );
   }, [labeledDescriptors, faces.length]);
 
   const stopDetection = useCallback(() => {
@@ -152,13 +172,7 @@ function App() {
   }, []);
 
   if (!isModelLoaded) {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-blue-50 to-purple-50 flex items-center justify-center">
-        <div className="animate-pulse text-xl font-semibold text-blue-600">
-          Loading AI models...
-        </div>
-      </div>
-    );
+    return <ModelsLoading />;
   }
 
   return (
@@ -166,38 +180,18 @@ function App() {
       <Toaster position="top-right" />
       <div className="max-w-4xl mx-auto">
         <div className="bg-white rounded-2xl shadow-xl p-6 mb-6">
-          <header className="flex items-center gap-3 mb-8">
-            <Camera className="w-8 h-8 text-blue-600" />
-            <h1 className="text-3xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
-              FaceGuard AI
-            </h1>
-          </header>
-
-          <div className="mb-6 space-y-4">
-            <label className="block text-sm font-medium text-gray-600">
-              Camera Selection
-            </label>
-            <select
-              value={currentDevice}
-              onChange={(e) => setCurrentDevice(e.target.value)}
-              className="w-full px-4 py-2.5 rounded-xl border border-gray-200 focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
-            >
-              {devices.map(device => (
-                <option key={device.deviceId} value={device.deviceId}>
-                  {device.label}
-                </option>
-              ))}
-            </select>
-          </div>
+          <Header />
+          
+          <CameraSelector currentDevice={currentDevice} setCurrentDevice={setCurrentDevice} devices={devices}/>
 
           <div className="relative mb-8 rounded-xl overflow-hidden border-4 border-gray-100">
             <Webcam
               ref={webcamRef}
               audio={false}
-              videoConstraints={{ 
+              videoConstraints={{
                 deviceId: currentDevice,
                 width: { ideal: 1280 },
-                height: { ideal: 720 }
+                height: { ideal: 720 },
               }}
               className="w-full aspect-video"
               onUserMedia={() => setIsWebcamReady(true)}
@@ -233,7 +227,8 @@ function App() {
 
               <div className="flex justify-between items-center">
                 <div className="text-sm text-gray-500">
-                  {faces.length} registered {faces.length === 1 ? "face" : "faces"}
+                  {faces.length} registered{" "}
+                  {faces.length === 1 ? "face" : "faces"}
                 </div>
                 <button
                   onClick={startDetection}
