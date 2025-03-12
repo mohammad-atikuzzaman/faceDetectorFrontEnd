@@ -12,6 +12,7 @@ import toast, { Toaster } from "react-hot-toast";
 import ModelsLoading from "./components/ModelsLoading";
 import Header from "./components/Header";
 import CameraSelector from "./components/CameraSelector";
+import LoadingSpinner from "./components/LoadingSpinner";
 
 interface FacePerson {
   name: string;
@@ -181,8 +182,12 @@ function App() {
       <div className="max-w-4xl mx-auto">
         <div className="bg-white rounded-2xl shadow-xl p-6 mb-6">
           <Header />
-          
-          <CameraSelector currentDevice={currentDevice} setCurrentDevice={setCurrentDevice} devices={devices}/>
+
+          <CameraSelector
+            currentDevice={currentDevice}
+            setCurrentDevice={setCurrentDevice}
+            devices={devices}
+          />
 
           <div className="relative mb-8 rounded-xl overflow-hidden border-4 border-gray-100">
             <Webcam
@@ -198,9 +203,7 @@ function App() {
               onUserMediaError={() => toast.error("Camera access denied")}
             />
             {!isWebcamReady && (
-              <div className="absolute inset-0 bg-gray-100 flex items-center justify-center">
-                <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-600"></div>
-              </div>
+              <LoadingSpinner/>
             )}
           </div>
 
