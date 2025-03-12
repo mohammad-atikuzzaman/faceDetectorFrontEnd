@@ -7,7 +7,6 @@ import React, {
 } from "react";
 import Webcam from "react-webcam";
 import * as faceapi from "face-api.js";
-import { Plus, Scan, Video, X } from "lucide-react";
 import toast, { Toaster } from "react-hot-toast";
 import ModelsLoading from "./components/ModelsLoading";
 import Header from "./components/Header";
@@ -16,6 +15,7 @@ import LoadingSpinner from "./components/LoadingSpinner";
 import UserNameForm from "./components/UserNameForm";
 import DetectingButton from "./components/DetectingButton";
 import StopDetectingButton from "./components/StopDetectingButton";
+import AddedUsers from "./components/AddedUsers";
 
 interface FacePerson {
   name: string;
@@ -223,28 +223,7 @@ function App() {
             <StopDetectingButton stopDetection={stopDetection} />
           )}
 
-          {faces.length > 0 && (
-            <div className="mt-8">
-              <h3 className="text-lg font-semibold mb-4 text-gray-700">
-                Registered Persons
-              </h3>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                {faces.map((face, index) => (
-                  <div
-                    key={index}
-                    className="p-3 bg-blue-50 rounded-lg border border-blue-100 animate-fade-in"
-                  >
-                    <div className="flex items-center gap-2">
-                      <Video className="w-4 h-4 text-blue-600" />
-                      <span className="text-sm font-medium text-blue-800">
-                        {face.name}
-                      </span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
+          {faces.length > 0 && <AddedUsers faces={faces} />}
         </div>
       </div>
     </div>
